@@ -139,6 +139,27 @@ export default function Home() {
             </Button>
           </DialogContent>
         </Dialog>
+        {/* --- NEW IMAGE AREA (พื้นที่รูปภาพใหม่) --- */}
+        {/* ใช้ glassCardStyle เพื่อให้กรอบดูเป็นกระจกเข้ากับธีม */}
+        <div className={`mt-6 rounded-xl overflow-hidden relative group ${glassCardStyle} border-white/5`}>
+             
+             {/* ตัวรูปภาพ (เปลี่ยนลิงก์ src เป็นรูปที่คุณต้องการได้เลย) */}
+             <img
+               src="/sidebar-bg.jpg" // รูปตัวอย่าง (ภูเขา)
+               alt="Sidebar Inspiration"
+               // ปรับความสูงที่ h-48 (หรือเปลี่ยนเป็น h-64 ถ้าอยากได้รูปยาวๆ)
+               className="w-full h-48 object-cover opacity-70 group-hover:opacity-100 group-hover:scale-110 transition-all duration-700 ease-in-out"
+             />
+             
+             {/* เงาดำๆ ด้านล่างรูป เพื่อให้ใส่ข้อความแล้วอ่านง่าย (ถ้าต้องการ) */}
+             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-40 transition-opacity"></div>
+
+             {/* ข้อความบนรูป (ถ้าไม่อยากได้ ลบส่วนนี้ทิ้งได้ครับ) */}
+             <div className="absolute bottom-4 left-4 right-4">
+                <p className="text-white font-bold text-lg drop-shadow-md">Focus on Today.</p>
+                <p className="text-zinc-300 text-xs">Make every hour count.</p>
+             </div>
+        </div>
       </aside>
 
       {/* --- MAIN CONTENT --- */}
