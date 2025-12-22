@@ -3,6 +3,11 @@
 import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { supabase } from "@/lib/supabaseClient";
+// DnD Imports
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from "@dnd-kit/core";
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { SortableItem } from "@/components/SortableItem"; 
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Calendar } from "@/components/ui/calendar";
@@ -11,31 +16,61 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Clock, Link as LinkIcon, Trash2, Loader2, CalendarDays } from "lucide-react";
+import { Plus, Clock, Link as LinkIcon, Trash2, Loader2, Heart, Pencil } from "lucide-react"; // อย่าลืมเช็คว่ามี Heart ไหม
+import { SidebarGallery } from "@/components/SidebarGallery";
 
-// --- TYPE DEFINITIONS ---
+// --- CUSTOM STYLES ---
+const customStyles = `
+  @keyframes flowVertical {
+    0% { background-position: 0 0; }
+    100% { background-position: 0 40px; }
+  }
+  .flowing-line {
+    background-image: linear-gradient(to bottom, #ef4444 50%, transparent 50%);
+    background-size: 2px 20px;
+    background-repeat: repeat-y;
+    animation: flowVertical 1s linear infinite;
+    opacity: 0.6;
+  }
+  .neon-glow:hover {
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.6), inset 0 0 10px rgba(239, 68, 68, 0.2);
+    border-color: #fca5a5;
+  }
+  .glass-tech {
+    background: rgba(10, 10, 10, 0.6);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+  }
+`;
+
 interface Activity {
   id: string; title: string; description: string; start_time: string;
   end_time: string; image_url: string; link: string; color: string; date: string;
 }
 
-// --- GLASS STYLE CONSTANTS ---
-// สไตล์กระจก Apple Glass (พื้นหลังดำโปร่งแสง + เบลอ + ขอบขาวบางๆ)
-const glassCardStyle = "bg-zinc-900/40 backdrop-blur-md border border-white/10 shadow-[0_8px_32px_0_rgba(0,0,0,0.36)]";
-const glassInputStyle = "bg-zinc-800/50 border-white/10 focus-visible:ring-white/20 text-white placeholder:text-zinc-500";
-
 export default function Home() {
-  // --- STATE ---
   const [date, setDate] = useState<Date | undefined>(new Date());
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(false);
+  
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null); 
+
   const [formData, setFormData] = useState({
     title: "", description: "", start_time: "09:00", end_time: "10:00",
-    image_url: "", link: "", color: "bg-zinc-800 text-white border-zinc-600", // Default dark theme color
+    image_url: "", link: "", color: "bg-red-950/40 text-red-300 border-red-500", 
   });
 
-  // --- FETCH DATA ---
+  // 🟢 แก้ไขจุดที่ 1: ตั้งค่า Sensor ให้รอขยับเมาส์ 8px ก่อนค่อยลาก (ทำให้กดปุ่มได้)
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // ต้องลากเกิน 8px ถึงจะเริ่ม drag
+      },
+    }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
   const fetchActivities = async () => {
     if (!date) return;
     setLoading(true);
@@ -45,201 +80,245 @@ export default function Home() {
       .select("*")
       .eq("date", dateStr)
       .order("start_time", { ascending: true });
-    if (error) console.error("Error fetching:", error);
+    
+    if (error) console.error(error);
     else setActivities(data || []);
     setLoading(false);
   };
 
   useEffect(() => { fetchActivities(); }, [date]);
 
-  // --- SAVE DATA ---
+  const handleEdit = (item: Activity) => {
+    // console.log("Edit clicked", item.id); // เอาไว้เช็ค
+    setEditingId(item.id); 
+    setFormData({
+      title: item.title,
+      description: item.description,
+      start_time: item.start_time,
+      end_time: item.end_time,
+      image_url: item.image_url,
+      link: item.link,
+      color: item.color,
+    });
+    setIsDialogOpen(true); 
+  };
+
   const handleSave = async () => {
     if (!date || !formData.title) return;
     setLoading(true);
-    const { error } = await supabase.from("schedule_items").insert([{...formData, date: format(date, "yyyy-MM-dd")},]);
-    if (error) { alert("Error saving data!"); } 
-    else {
-      setIsDialogOpen(false);
-      setFormData({ title: "", description: "", start_time: "09:00", end_time: "10:00", image_url: "", link: "", color: "bg-zinc-800 text-white border-zinc-600"});
-      fetchActivities();
+    const dateStr = format(date, "yyyy-MM-dd");
+
+    if (editingId) {
+      const { error } = await supabase
+        .from("schedule_items")
+        .update({ ...formData })
+        .eq("id", editingId);
+      if (error) alert("Update failed!");
+    } else {
+      const { error } = await supabase
+        .from("schedule_items")
+        .insert([{ ...formData, date: dateStr }]);
+      if (error) alert("Save failed!");
     }
+
+    setIsDialogOpen(false);
+    setEditingId(null);
+    setFormData({ title: "", description: "", start_time: "09:00", end_time: "10:00", image_url: "", link: "", color: "bg-red-950/40 text-red-300 border-red-500"});
+    fetchActivities();
     setLoading(false);
   };
 
-  // --- DELETE DATA ---
   const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this?")) return;
+    if (!confirm("Delete this mission?")) return;
     const { error } = await supabase.from("schedule_items").delete().eq("id", id);
     if (!error) fetchActivities();
   };
 
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (active.id !== over?.id) {
+      setActivities((items) => {
+        const oldIndex = items.findIndex((item) => item.id === active.id);
+        const newIndex = items.findIndex((item) => item.id === over?.id);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  };
+
   return (
-    // Main Container: พื้นหลังสีดำ พร้อม Gradient เบาๆ เพื่อให้กระจกดูมีมิติ
-    <div className="min-h-screen bg-[#0a0a0a] text-zinc-100 flex flex-col md:flex-row bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-zinc-900 via-[#0a0a0a] to-black">
-      
-      {/* --- SIDEBAR (GLASS) --- */}
-      <aside className={`w-full md:w-80 p-6 flex flex-col gap-6 fixed md:relative h-auto md:h-screen z-20 ${glassCardStyle} border-r border-white/5`}>
+    <div className="min-h-screen bg-[#050505] text-zinc-100 flex flex-col md:flex-row font-sans selection:bg-red-500/30">
+      <style>{customStyles}</style>
+
+      {/* --- SIDEBAR --- */}
+      <aside className="w-full md:w-80 p-6 flex flex-col gap-6 fixed md:relative h-auto md:h-screen z-20 border-r border-red-900/30 bg-[#0a0a0a]/80 backdrop-blur-xl">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-            <CalendarDays className="w-6 h-6" /> นิ้งกล้ากล้านิ้ง
+          <h1 className="text-3xl font-black tracking-tighter flex items-center gap-2 text-transparent bg-clip-text bg-gradient-to-r from-white via-red-200 to-red-500 drop-shadow-[0_0_10px_rgba(239,68,68,0.5)]">
+            <Heart className="w-6 h-6 text-red-500 fill-red-500 animate-pulse" /> นิ้งกล้ากล้านิ้ง
           </h1>
-          <p className="text-zinc-400 text-sm mt-1">Craft your day in style.</p>
+          <p className="text-red-400/60 text-xs uppercase tracking-widest mt-2 font-bold">System Online • v.2.1</p>
         </div>
         
-        {/* Calendar Container (Glass within Glass) */}
-        <div className={`p-4 rounded-xl ${glassCardStyle} bg-black/20`}>
+        <div className="p-4 rounded-xl glass-tech shadow-[0_0_30px_-10px_rgba(239,68,68,0.15)]">
           <Calendar 
             mode="single" selected={date} onSelect={setDate} 
             className="rounded-md text-zinc-300"
-            // ปรับสีปฏิทินให้เข้ากับ Dark Mode
             classNames={{
-              day_selected: "bg-white text-black hover:bg-white/90 focus:bg-white",
-              day_today: "bg-zinc-800 text-white",
+              day_selected: "bg-red-600 text-white hover:bg-red-500 shadow-[0_0_15px_rgba(220,38,38,0.6)] font-bold border border-red-400",
+              day_today: "text-red-400 font-bold decoration-red-500 underline-offset-4",
             }}
           />
         </div>
 
-        {/* CREATE DIALOG */}
-        <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <Dialog open={isDialogOpen} onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if(!open) setEditingId(null); 
+        }}>
           <DialogTrigger asChild>
-            <Button size="lg" className="w-full bg-white text-black hover:bg-white/90 shadow-[0_0_15px_rgba(255,255,255,0.1)] transition-all hover:scale-[1.02]">
-              <Plus className="mr-2 h-4 w-4" /> Add Activity
+            <Button size="lg" className="w-full bg-red-600 hover:bg-red-500 text-white border border-red-400 shadow-[0_0_20px_rgba(220,38,38,0.4)] transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(220,38,38,0.6)] uppercase tracking-wider font-bold">
+              <Plus className="mr-2 h-5 w-5" /> New Mission
             </Button>
           </DialogTrigger>
-          {/* Dialog Content (Glass Style) */}
-          <DialogContent className={`sm:max-w-[425px] ${glassCardStyle} text-zinc-100 border-white/10`}>
+          <DialogContent className="sm:max-w-[425px] bg-[#0f0f0f]/95 border border-red-500/50 backdrop-blur-2xl text-zinc-100 z-50">
             <DialogHeader>
-              <DialogTitle>Add New Activity</DialogTitle>
+              <DialogTitle className="text-red-400 uppercase tracking-widest">
+                {editingId ? "Edit Mission" : "Initialize Task"}
+              </DialogTitle>
             </DialogHeader>
             <div className="grid gap-4 py-4">
-              {/* Inputs styles for dark mode */}
-              <div className="grid gap-2"><Label>Activity Name</Label><Input className={glassInputStyle} value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} placeholder="e.g. Deep Work" /></div>
+              <div className="grid gap-2"><Label className="text-red-300/70">Mission Name</Label><Input className="bg-black/50 border-red-500/30" value={formData.title} onChange={(e) => setFormData({...formData, title: e.target.value})} /></div>
               <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2"><Label>Start</Label><Input type="time" className={glassInputStyle} value={formData.start_time} onChange={(e) => setFormData({...formData, start_time: e.target.value})} /></div>
-                <div className="grid gap-2"><Label>End</Label><Input type="time" className={glassInputStyle} value={formData.end_time} onChange={(e) => setFormData({...formData, end_time: e.target.value})} /></div>
+                <div className="grid gap-2"><Label className="text-red-300/70">Start</Label><Input type="time" className="bg-black/50 border-red-500/30" value={formData.start_time} onChange={(e) => setFormData({...formData, start_time: e.target.value})} /></div>
+                <div className="grid gap-2"><Label className="text-red-300/70">End</Label><Input type="time" className="bg-black/50 border-red-500/30" value={formData.end_time} onChange={(e) => setFormData({...formData, end_time: e.target.value})} /></div>
               </div>
-              <div className="grid gap-2"><Label>Description</Label><Textarea className={glassInputStyle} value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} placeholder="Details..." /></div>
-              <div className="grid gap-2"><Label>Image URL</Label><Input className={glassInputStyle} value={formData.image_url} onChange={(e) => setFormData({...formData, image_url: e.target.value})} placeholder="https://..." /></div>
-              <div className="grid gap-2"><Label>Link</Label><Input className={glassInputStyle} value={formData.link} onChange={(e) => setFormData({...formData, link: e.target.value})} placeholder="https://..." /></div>
-              
-              {/* Color Select (Dark Mode Friendly) */}
-              <div className="grid gap-2"><Label>Tag Style</Label>
-                <select className={`flex h-10 w-full rounded-md border px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${glassInputStyle}`} value={formData.color} onChange={(e) => setFormData({...formData, color: e.target.value})}>
-                  {/* ใช้สีแบบ Dark Mode (พื้นหลังใส + ขอบสี + ตัวหนังสือสี) */}
-                  <option value="bg-zinc-800/50 text-zinc-300 border-zinc-700">Neutral (Gray)</option>
-                  <option value="bg-blue-950/50 text-blue-300 border-blue-800">Work (Blue)</option>
-                  <option value="bg-red-950/50 text-red-300 border-red-800">Important (Red)</option>
-                  <option value="bg-emerald-950/50 text-emerald-300 border-emerald-800">Personal (Green)</option>
-                  <option value="bg-purple-950/50 text-purple-300 border-purple-800">Creative (Purple)</option>
+              <div className="grid gap-2"><Label className="text-red-300/70">Details</Label><Textarea className="bg-black/50 border-red-500/30" value={formData.description} onChange={(e) => setFormData({...formData, description: e.target.value})} /></div>
+              <div className="grid gap-2"><Label className="text-red-300/70">Image URL</Label><Input className="bg-black/50 border-red-500/30" value={formData.image_url} onChange={(e) => setFormData({...formData, image_url: e.target.value})} /></div>
+              <div className="grid gap-2"><Label className="text-red-300/70">Link</Label><Input className="bg-black/50 border-red-500/30" value={formData.link} onChange={(e) => setFormData({...formData, link: e.target.value})} /></div>
+              <div className="grid gap-2"><Label className="text-red-300/70">Tag Color</Label>
+                <select className="flex h-10 w-full rounded-md border border-red-500/30 bg-black/50 px-3 py-2 text-sm text-zinc-300" value={formData.color} onChange={(e) => setFormData({...formData, color: e.target.value})}>
+                  <option value="bg-red-950/40 text-red-300 border-red-500">Red</option>
+                  <option value="bg-purple-950/40 text-purple-300 border-purple-500">Purple</option>
+                  <option value="bg-blue-950/40 text-blue-300 border-blue-500">Blue</option>
                 </select>
               </div>
             </div>
-            <Button onClick={handleSave} disabled={loading} className="bg-white text-black hover:bg-white/90">
-              {loading ? <Loader2 className="animate-spin mr-2" /> : "Save Activity"}
+            <Button onClick={handleSave} disabled={loading} className="bg-red-600 hover:bg-red-500 text-white font-bold w-full">
+              {loading ? <Loader2 className="animate-spin mr-2" /> : (editingId ? "UPDATE DATA" : "CONFIRM MISSION")}
             </Button>
           </DialogContent>
         </Dialog>
-        {/* --- NEW IMAGE AREA (พื้นที่รูปภาพใหม่) --- */}
-        {/* ใช้ glassCardStyle เพื่อให้กรอบดูเป็นกระจกเข้ากับธีม */}
-        <div className={`mt-6 rounded-xl overflow-hidden relative group ${glassCardStyle} border-white/5`}>
-             
-             {/* ตัวรูปภาพ (เปลี่ยนลิงก์ src เป็นรูปที่คุณต้องการได้เลย) */}
-             <img
-               src="/sidebar-bg.jpg" // รูปตัวอย่าง (ภูเขา)
-               alt="Sidebar Inspiration"
-               // ปรับความสูงที่ h-48 (หรือเปลี่ยนเป็น h-64 ถ้าอยากได้รูปยาวๆ)
-               className="w-full h-48 object-cover opacity-70 group-hover:opacity-100 group-hover:scale-110 transition-all duration-700 ease-in-out"
-             />
-             
-             {/* เงาดำๆ ด้านล่างรูป เพื่อให้ใส่ข้อความแล้วอ่านง่าย (ถ้าต้องการ) */}
-             <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-60 group-hover:opacity-40 transition-opacity"></div>
 
-             {/* ข้อความบนรูป (ถ้าไม่อยากได้ ลบส่วนนี้ทิ้งได้ครับ) */}
-             <div className="absolute bottom-4 left-4 right-4">
-                <p className="text-white font-bold text-lg drop-shadow-md">Focus on Today.</p>
-                <p className="text-zinc-300 text-xs">Make every hour count.</p>
-             </div>
-        </div>
+        <SidebarGallery />
       </aside>
 
       {/* --- MAIN CONTENT --- */}
-      <main className="flex-1 p-6 md:p-10 overflow-y-auto relative z-10">
-        <div className="max-w-3xl mx-auto">
-          <div className="flex justify-between items-end mb-10">
+      <main className="flex-1 p-6 md:p-10 overflow-y-auto relative z-10 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-red-900/20 via-[#050505] to-black">
+        <div className="max-w-4xl mx-auto">
+          <div className="flex justify-between items-end mb-12 border-b border-red-500/20 pb-6">
             <div>
-              <h2 className="text-4xl font-black tracking-tighter text-white drop-shadow-sm">
-                {date ? format(date, "EEEE, d MMMM") : "Select a date"}
+              <h2 className="text-5xl font-black tracking-tighter text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.3)] uppercase">
+                {date ? format(date, "EEEE, d MMM") : "Select Date"}
               </h2>
-              <p className="text-zinc-400 mt-2 font-medium">{activities.length} activities scheduled</p>
+              <p className="text-red-400 mt-2 font-mono text-sm tracking-widest flex items-center gap-2">
+                 <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse shadow-[0_0_10px_#22c55e]"></span>
+                 {activities.length} MISSIONS ACTIVE
+              </p>
             </div>
           </div>
 
-          {/* Timeline Container (เส้นแกนกลางสีเข้ม) */}
-          <div className="space-y-8 relative border-l border-white/10 ml-3 md:ml-6 pl-8 md:pl-12 pb-10">
-            {loading ? (
-               <div className="text-zinc-500 flex items-center gap-2"><Loader2 className="animate-spin h-4 w-4"/> Loading schedule...</div>
-            ) : activities.length === 0 ? (
-               <div className="text-zinc-600 italic">Your canvas is empty. Add an activity to begin.</div>
-            ) : (
-              activities.map((item) => (
-                <div key={item.id} className="relative group perspective-1000">
-                  {/* จุดกลมบน Timeline (เรืองแสงตามสีที่เลือก) */}
-                  <div className={`absolute -left-[41px] md:-left-[57px] top-5 w-4 h-4 rounded-full border-2 border-[#0a0a0a] shadow-[0_0_10px_rgba(255,255,255,0.2)] transition-all group-hover:scale-125 ${item.color.split(" ")[0].replace("/50","")}`}></div>
-                  
-                  {/* ACTIVITY CARD (GLASS!) */}
-                  <Card className={`${glassCardStyle} border-none transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.5)] group overflow-hidden`}>
-                    <CardContent className="p-0 flex flex-col sm:flex-row">
+          <div className="space-y-12 relative ml-3 md:ml-8 pl-10 md:pl-16 pb-20">
+            <div className="absolute left-[3px] md:left-[3px] top-2 bottom-0 w-[2px] flowing-line z-0"></div>
+
+            {/* DND CONTEXT WRAPPER */}
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={activities.map(a => a.id)} strategy={verticalListSortingStrategy}>
+                
+                {loading ? (
+                   <div className="text-red-500 flex items-center gap-3 text-lg animate-pulse"><Loader2 className="animate-spin h-6 w-6"/> Synchronizing data...</div>
+                ) : activities.length === 0 ? (
+                   <div className="text-zinc-600 font-mono border border-dashed border-zinc-800 p-8 rounded-xl text-center">NO DATA DETECTED.</div>
+                ) : (
+                  activities.map((item) => (
+                    <SortableItem key={item.id} id={item.id} className="relative group">
                       
-                      {/* Time Section */}
-                      <div className="p-5 sm:w-36 flex flex-row sm:flex-col items-center sm:justify-center gap-2 text-zinc-400 font-medium border-b sm:border-b-0 sm:border-r border-white/5 bg-black/20">
-                        <Clock className="w-4 h-4 text-zinc-500" />
-                        <span className="text-sm text-center tracking-wider">{item.start_time.slice(0,5)}<br className="hidden sm:block"/> - <br className="hidden sm:block"/>{item.end_time.slice(0,5)}</span>
+                      <div className={`absolute -left-[45px] md:-left-[69px] top-6 w-5 h-5 rounded-full bg-[#0a0a0a] border-2 border-red-500 z-10 shadow-[0_0_15px_rgba(220,38,38,0.8)] group-hover:scale-125 transition-transform duration-300`}>
+                         <div className="absolute inset-0 bg-red-500 rounded-full opacity-20 animate-ping"></div>
                       </div>
-
-                      {/* Content Section */}
-                      <div className="p-5 flex-1 relative">
-                        <button 
-                          onClick={() => handleDelete(item.id)}
-                          className="absolute top-3 right-3 p-2 text-zinc-600 hover:text-red-400 hover:bg-red-500/10 rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-
-                        <div className="flex justify-between items-start mb-3 pr-8">
-                          {/* Glass Badge */}
-                          <Badge variant="outline" className={`${item.color} backdrop-blur-sm px-3 py-1 text-xs uppercase tracking-wider font-bold shadow-sm`}>
-                            {item.title}
-                          </Badge>
-                        </div>
-                        
-                        <p className="text-zinc-300 mb-4 text-sm leading-relaxed whitespace-pre-wrap font-light">
-                          {item.description}
-                        </p>
-
-                        {item.image_url && (
-                          <div className="mb-4 rounded-lg overflow-hidden h-52 w-full relative border border-white/10 group-hover:border-white/30 transition-colors">
-                             <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent z-10"></div>
-                             <img src={item.image_url} alt={item.title} className="object-cover w-full h-full transform group-hover:scale-105 transition-transform duration-700" />
+                      
+                      <Card className={`glass-tech neon-glow transition-all duration-300 hover:-translate-y-2 group overflow-hidden relative border-l-4 ${item.color.split(" ")[2].replace("border-", "border-l-")}`}>
+                        <CardContent className="p-0 flex flex-col sm:flex-row relative z-10">
+                          
+                          <div className="p-6 sm:w-40 flex flex-row sm:flex-col items-center sm:justify-center gap-2 text-zinc-400 font-mono border-b sm:border-b-0 sm:border-r border-red-500/20 bg-black/40 cursor-grab active:cursor-grabbing">
+                            <Clock className="w-5 h-5 text-red-500" />
+                            <span className="text-lg font-bold text-white tracking-wider">{item.start_time.slice(0,5)}</span>
+                            <span className="text-sm text-zinc-500">{item.end_time.slice(0,5)}</span>
                           </div>
-                        )}
 
-                        {item.link && (
-                          <a href={item.link} target="_blank" rel="noreferrer" className={`inline-flex items-center text-xs text-white hover:bg-white/20 font-medium px-4 py-2 rounded-full transition-all duration-300 ${glassCardStyle} border-white/20 hover:border-white/40`}>
-                            <LinkIcon className="w-3 h-3 mr-2" /> Open Resource
-                          </a>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              ))
-            )}
+                          <div className="p-6 flex-1 relative">
+                            {/* 🟢 แก้ไขจุดที่ 2: เพิ่ม z-index 50 ให้ปุ่มอยู่เหนือเลเยอร์การลาก และใช้ pointer-events-auto */}
+                            <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 z-50">
+                                <button 
+                                  // ใส่ onPointerDownCapture เพื่อหยุด Event การลากไม่ให้ทำงานเมื่อกดปุ่มนี้
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                      e.stopPropagation(); // กันไม่ให้ไปตีกับ Drag
+                                      handleEdit(item);
+                                  }}
+                                  className="p-2 text-zinc-400 hover:text-white hover:bg-white/10 rounded-full transition-colors cursor-pointer border border-transparent hover:border-white/20 bg-black/50 backdrop-blur-sm"
+                                  title="Edit"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  onPointerDown={(e) => e.stopPropagation()}
+                                  onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDelete(item.id);
+                                  }}
+                                  className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded-full transition-colors cursor-pointer border border-transparent hover:border-red-500/20 bg-black/50 backdrop-blur-sm"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                            </div>
+
+                            <div className="flex flex-wrap gap-2 mb-3 pr-16">
+                              <Badge variant="outline" className={`${item.color} backdrop-blur-md px-3 py-1 text-xs uppercase tracking-widest font-bold shadow-sm border`}>
+                                {item.title}
+                              </Badge>
+                            </div>
+                            
+                            <p className="text-zinc-300 mb-5 text-sm leading-relaxed whitespace-pre-wrap font-light tracking-wide">
+                              {item.description}
+                            </p>
+
+                            {item.image_url && (
+                              <div className="mb-4 rounded-lg overflow-hidden h-60 w-full relative border border-red-500/30 group-hover:border-red-400/80 transition-colors shadow-lg">
+                                 <img src={item.image_url} alt={item.title} className="object-cover w-full h-full transform group-hover:scale-105 transition-transform duration-700" />
+                              </div>
+                            )}
+
+                            {item.link && (
+                              <a href={item.link} target="_blank" rel="noreferrer" 
+                                 // กันไม่ให้กดลิงก์แล้วกลายเป็นการลาก
+                                 onPointerDown={(e) => e.stopPropagation()}
+                                 className="inline-flex items-center text-xs text-red-300 hover:text-white hover:bg-red-600 font-bold px-5 py-2 rounded-full transition-all duration-300 border border-red-500/40 hover:border-red-500 shadow-[0_0_15px_rgba(220,38,38,0.1)] hover:shadow-[0_0_20px_rgba(220,38,38,0.4)] cursor-pointer"
+                              >
+                                <LinkIcon className="w-3 h-3 mr-2" /> ACCESS DATA
+                              </a>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </SortableItem>
+                  ))
+                )}
+              </SortableContext>
+            </DndContext>
           </div>
         </div>
       </main>
       
-      {/* Background Noise/Gradient Overlay for more texture */}
-      <div className="fixed inset-0 pointer-events-none bg-[url('/noise.svg')] opacity-[0.03] z-0 mix-blend-overlay"></div>
+      <div className="fixed inset-0 pointer-events-none z-0 opacity-20" style={{ backgroundImage: 'linear-gradient(rgba(220, 38, 38, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(220, 38, 38, 0.1) 1px, transparent 1px)', backgroundSize: '40px 40px' }}></div>
     </div>
   );
 }
