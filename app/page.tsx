@@ -183,7 +183,7 @@ export default function Home() {
       >
         <div className="mt-12 md:mt-0"> {/* เพิ่ม margin top ในมือถือหลบปุ่ม X */}
           <h1 className="text-3xl font-black tracking-tighter flex items-center gap-2 text-transparent bg-clip-text bg-gradient-to-r from-white via-red-200 to-red-500 drop-shadow-[0_0_10px_rgba(239,68,68,0.5)]">
-            <Heart className="w-6 h-6 text-red-500 fill-red-500 animate-pulse" /> นิ้งนิ่งนิ๋งนิ๊งนิ็งนิง
+            <Heart className="w-6 h-6 text-red-500 fill-red-500 animate-pulse" /> อะอะอ่าว
           </h1>
           <p className="text-red-400/60 text-xs uppercase tracking-widest mt-2 font-bold">System Online • v.Mobile</p>
         </div>
